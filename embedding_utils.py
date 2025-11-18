@@ -13,5 +13,5 @@ def embed_texts(text_list):
     return model.encode(text_list, show_progress_bar=False, convert_to_numpy=True)
 
 # test run
-# error = embed_texts(["ERROR: Tests failed: AssertionError at test_utils.py:42"])
-# print(error.shape)
+error = embed_texts(["ERROR: Tests failed: AssertionError at test_utils.py:42"])
+print(error.shape)
