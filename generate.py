@@ -1,56 +1,126 @@
-def build_prompt(question, matches):
-    summary = []
+import json
+import requests
+from typing import Optional, List, Dict
+
+OLLAMA_MODEL = "llama3.1"
+OLLAMA_URL = "http://localhost:11434/api/generate"
+
+def build_prompt(question: str, matches: List[Dict]) -> str:
+    prompt = (
+        "You are a CI/CD debugging assistant.\n"
+        "Use ONLY the provided log snippets to answer the question.\n"
+        "Structure the response with: root cause -> short explanation -> concrete fix steps -> snippet ids used.\n\n"
+        f"Question: {question}\n\n"
+        "Snippets:\n"
+    )
+
     for i, m in enumerate(matches, start=1):
-        meta = m["metadata"]
-        preview = meta.get("preview", "")
+        meta = m.get("metadata", {})
+        preview = meta.get("preview", "").strip()
+        prompt += (
+            f"[SNIPPET {i} | id={m.get('id')} | job={meta.get('job_id')} | "
+            f"step={meta.get('step_name')} | status={meta.get('status')}]\n"
+            f"{preview}\n\n"
+        )
 
-        summary.append({
-            "snippet_id": m["id"],
-            "job": meta.get("job_id"),
-            "step": meta.get("step_name"),
-            "status": meta.get("status"),
-            "preview": preview
-        })
+    prompt += "\nAnswer:\n"
+    return prompt
 
-    return {
-        "question": question,
-        "analysis": "Retrieved top matching CI/CD log chunks based on semantic BERT embeddings.",
-        "snippets": summary
-    }
+def generate_answer(
+    question: str,
+    matches: List[Dict],
+    max_tokens: int = 400,
+    temperature: float = 0.1
+) -> Dict:
+    """Uses Ollama local API to generate a grounded answer."""
 
-
-def generate_answer(question, matches):
-    """
-    Return structured reasoning based ONLY on retrieved chunks.
-    No LLM. No generation. Only metadata-based explanation.
-    """
     prompt = build_prompt(question, matches)
 
-    # basic heuristic analysis
-    root_cause = "Unknown"
-    explanation = "Not enough evidence found."
-    fix = "Check CI/CD logs manually."
-
-    for m in matches:
-        meta = m["metadata"]
-        text = meta.get("preview", "")
-
-        if "ERROR" in text or meta.get("status") == "ERROR":
-            root_cause = "Error detected in pipeline."
-            explanation = f"Failure occurred in step '{meta.get('step_name')}' of job '{meta.get('job_id')}'."
-            fix = "Inspect failing step’s logs and validate configuration/tests."
-            break
-
-        if "failed" in text.lower():
-            root_cause = "A step failed."
-            explanation = f"Log suggests failure in step '{meta.get('step_name')}'."
-            fix = "Review error stack trace or command output."
-            break
-
-    return {
-        "root_cause": root_cause,
-        "explanation": explanation,
-        "suggested_fix": fix,
-        "matches_used": [m["id"] for m in matches],
-        "structured": prompt
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "options": {"temperature": temperature, "num_predict": max_tokens}
     }
+
+    resp = _post_ollama(payload)
+    return {
+        "answer": _parse_ollama_response(resp),
+        "prompt": prompt
+    }
+
+
+def _post_ollama(payload: Dict) -> requests.Response:
+    try:
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
+    except Exception as e:
+        raise RuntimeError(f"Failed to contact Ollama at {OLLAMA_URL}: {e}")
+
+    if resp.status_code != 200:
+        raise RuntimeError(f"Ollama returned {resp.status_code}: {resp.text}")
+
+    return resp
+
+
+def _extract_answer(fragment) -> str: 
+    if fragment is None:
+        return ""
+    if isinstance(fragment, list):
+        return " ".join(map(str, fragment))
+    return str(fragment)
+
+
+def _parse_json_body(resp: requests.Response) -> Optional[str]:
+    """Attempt normal JSON decoding."""
+    try:
+        data = resp.json()
+        return _extract_answer(
+            data.get("response")
+            or data.get("text")
+            or data.get("data")
+        ).strip()
+    except ValueError:
+        return None
+
+
+def _parse_streaming(resp: requests.Response) -> str:
+    full_text = ""
+    for line in resp.iter_lines(decode_unicode=True):
+        if not line:
+            continue
+
+        try:
+            obj = json.loads(line)
+            chunk = obj.get("response") or obj.get("data") or obj.get("text")
+            full_text += _extract_answer(chunk)
+
+        except Exception:
+            continue
+
+    return full_text.strip()
+
+
+def _parse_ollama_response(resp: requests.Response) -> str:
+    direct = _parse_json_body(resp)
+    if direct is not None:
+        return direct
+
+    try:
+        return _parse_streaming(resp)
+
+    except Exception as e:
+        raise RuntimeError(f"Could not parse Ollama response: {e}")
+
+
+def clean_matches(matches): 
+    cleaned = []
+    for m in matches:
+        cleaned.append({
+            "id": str(m.get("id")),
+            "score": float(m.get("score", 0)),
+            "metadata": {
+                k: (str(v) if not isinstance(v, (int, float, str)) else v)
+                for k, v in m.get("metadata", {}).items()
+            }
+        })
+
+    return cleaned

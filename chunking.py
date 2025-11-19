@@ -6,7 +6,7 @@ from embedding_utils import load_model, embed_texts
 load_dotenv()
 
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-INDEX_NAME = "ci-cd-logs"
+INDEX_NAME = os.getenv("PIENCONE_INDEX_NAME")
 
 
 def init_pinecone():

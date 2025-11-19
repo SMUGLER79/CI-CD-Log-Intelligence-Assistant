@@ -1,10 +1,10 @@
 import os
 from pinecone import Pinecone
-from pinecone_client import init_pinecone, upsert_chunks, INDEX_NAME
+from chunking import init_pinecone, upsert_chunks
 from ingest import chunk_log_lines
 
-LOG_FILE_PATH = "logs/sample_logs.txt"
-
+LOG_FILE = os.getenv("LOG_FILE_PATH")
+INDEX_NAME = os.getenv("PIENCONE_INDEX_NAME")
 
 def load_log_file(path):    #error handling for loading and file and if not found
     if not os.path.exists(path):
@@ -15,12 +15,12 @@ def load_log_file(path):    #error handling for loading and file and if not foun
 
 
 def main():
-    lines = load_log_file(LOG_FILE_PATH)
-    chunks = chunk_log_lines(lines, source=LOG_FILE_PATH) 
+    lines = load_log_file(LOG_FILE)
+    chunks = chunk_log_lines(lines, source=LOG_FILE) 
     print(f"Created {len(chunks)} chunks")
 
     index = init_pinecone()
-    print("Done indexing, now uploading to Pinecone...")
+    print("Done indexing, uploading to Pinecone.")
 
     total = upsert_chunks(index, chunks, batch_size=100)
     print(f"Uploaded {total} vectors to Pinecone index '{INDEX_NAME}'")
