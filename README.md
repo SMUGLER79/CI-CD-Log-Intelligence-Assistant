@@ -1,4 +1,4 @@
-# CI-CD Log Intelligent Assistant
+# LogGPT - CI/CD Log Intelligent Assistant
 
 ## Introduction
 
@@ -113,3 +113,4 @@ Output: “The failure occurred due to missing environment variable DB_HOST in j
 * **Logs too large / memory error**: Adjust chunk size in `chunking.py` or process logs incrementally.
 * **Queries not returning meaningful results**: Check that embeddings were stored properly; verify that vector DB (if used) is properly configured.
 * **Pipeline integration missing**: This module processes logs — you’ll need to integrate it into your CI/CD workflow (e.g., as a job in GitHub Actions, GitLab CI) to automate ingestion
+
